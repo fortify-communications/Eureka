@@ -53,13 +53,13 @@ extension Section {
 
     internal class KVOWrapper: NSObject {
 
-        dynamic var _rows = NSMutableArray()
+        @objc private var _rows = NSMutableArray()
         var rows: NSMutableArray {
             return mutableArrayValue(forKey: "_rows")
         }
         var _allRows = [BaseRow]()
 
-        weak var section: Section?
+        private weak var section: Section?
 
         init(section: Section) {
             self.section = section
@@ -69,6 +69,8 @@ extension Section {
 
         deinit {
             removeObserver(self, forKeyPath: "_rows")
+            _rows.removeAllObjects()
+            _allRows.removeAll()
         }
 
         public override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
@@ -196,10 +198,10 @@ open class Section {
     var hiddenCache = false
 }
 
-extension Section : MutableCollection, BidirectionalCollection {
-
+extension Section: MutableCollection, BidirectionalCollection {
+    
     // MARK: MutableCollectionType
-
+    
     public var startIndex: Int { return 0 }
     public var endIndex: Int { return kvoWrapper.rows.count }
     public subscript (position: Int) -> BaseRow {
@@ -209,17 +211,36 @@ extension Section : MutableCollection, BidirectionalCollection {
             }
             return kvoWrapper.rows[position] as! BaseRow
         }
-        set { kvoWrapper.rows[position] = newValue }
+        set {
+            if position > kvoWrapper.rows.count {
+                assertionFailure("Section: Index out of bounds")
+            }
+            
+            if position < kvoWrapper.rows.count {
+                let oldRow = kvoWrapper.rows[position]
+                let oldRowIndex = kvoWrapper._allRows.index(of: oldRow as! BaseRow)!
+                // Remove the previous row from the form
+                kvoWrapper._allRows[oldRowIndex].willBeRemovedFromForm()
+                kvoWrapper._allRows[oldRowIndex] = newValue
+            } else {
+                kvoWrapper._allRows.append(newValue)
+            }
+            
+            kvoWrapper.rows[position] = newValue
+            newValue.wasAddedTo(section: self)
+        }
     }
-
-    public subscript (range: Range<Int>) -> [BaseRow] {
-        get { return kvoWrapper.rows.objects(at: IndexSet(integersIn: range)) as! [BaseRow] }
-        set { kvoWrapper.rows.replaceObjects(in: NSRange(range), withObjectsFrom: newValue) }
+    
+    public subscript (range: Range<Int>) -> ArraySlice<BaseRow> {
+        get { return kvoWrapper.rows.map({ $0 as! BaseRow })[range] }
+        set {
+            replaceSubrange(range, with: newValue)
+        }
     }
-
-    public func index(after i: Int) -> Int {return i + 1}
-    public func index(before i: Int) -> Int {return i - 1}
-
+    
+    public func index(after i: Int) -> Int { return i + 1 }
+    public func index(before i: Int) -> Int { return i - 1 }
+    
 }
 
 extension Section : RangeReplaceableCollection {
